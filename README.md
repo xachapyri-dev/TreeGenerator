@@ -13,6 +13,10 @@
 </p>
 
 <p align="center">
+  <a href="http://k90052gj.beget.tech/projectPages/treeGenerator">Страница проекта</a>
+</p>
+
+<p align="center">
   <a href="https://xachapyri-dev.itch.io/tree-generator">
     <img src="https://img.shields.io/badge/itch.io-Скачать%20на%20Itch.io-FA5C5C?style=for-the-badge&logo=itchdotio&logoColor=white" alt="Itch.io Page">
   </a>
