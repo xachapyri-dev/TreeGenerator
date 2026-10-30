@@ -47,7 +47,7 @@ jobs:
 
       - name: Build with PyInstaller (onedir with _internal)
         run: |
-          pyinstaller main.py \
+          pyinstaller TreeGenerator.py \
             --name TreeGenerator \
             --onedir \
             --windowed \
