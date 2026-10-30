@@ -1,18 +1,37 @@
 import os
 import sys
-os.environ["MESA_GL_VERSION_OVERRIDE"] = "3.3"
-os.environ["MESA_GLSL_VERSION_OVERRIDE"] = "330"
+import re
+import ast
 import copy
 import random
 import ctypes
 import inspect
 import traceback
 import numpy as np
+
+os.environ["MESA_GL_VERSION_OVERRIDE"] = "3.3"
+os.environ["MESA_GLSL_VERSION_OVERRIDE"] = "330"
+
 from PyQt6 import QtWidgets, QtGui, QtCore
 from PyQt6.QtGui import QSurfaceFormat, QKeySequence, QShortcut
 from PyQt6.QtWidgets import QMessageBox, QApplication
+
+GLOBAL_LOC_MGR = None
+
 def exception_hook(exctype, value, tb):
+    err_str = str(value)
+    try:
+        def decode_match(m):
+            try:
+                return ast.literal_eval(m.group(0)).decode('cp1251')
+            except:
+                return m.group(0)
+        err_str = re.sub(r"b'.*?'", decode_match, err_str)
+    except:
+        pass
+
     error_msg = "".join(traceback.format_exception(exctype, value, tb))
+    
     try:
         log_dir = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
         log_path = os.path.join(log_dir, "crash.log")
@@ -20,19 +39,23 @@ def exception_hook(exctype, value, tb):
             f.write(error_msg + "\n" + "="*50 + "\n")
     except Exception:
         pass
+        
     if QApplication.instance():
-        QMessageBox.critical(
-            None,
-            "Критическая ошибка",
-            f"Произошла ошибка:\n\n{value}\n\nПодробный отчет записан в crash.log"
-        )
+        title = GLOBAL_LOC_MGR.tr("critical_error_title", "Критическая ошибка") if GLOBAL_LOC_MGR else "Critical Error"
+        template = GLOBAL_LOC_MGR.tr("critical_error_text", "Произошла ошибка:\n\n{0}\n\nПодробный отчет записан в crash.log") if GLOBAL_LOC_MGR else "Error:\n\n{0}"
+        
+        QMessageBox.critical(None, title, template.format(err_str))
+        
     sys.__excepthook__(exctype, value, tb)
+
 sys.excepthook = exception_hook
+
 gl_format = QSurfaceFormat()
 gl_format.setVersion(3, 3)
 gl_format.setProfile(QSurfaceFormat.OpenGLContextProfile.CoreProfile)
 gl_format.setDepthBufferSize(24)
 QSurfaceFormat.setDefaultFormat(gl_format)
+
 from UI.MainWindow import Ui_MainWindow
 from gl_widget import TreeGLWidget
 from generator import TreeMeshGenerator
@@ -78,7 +101,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         idx = parent_layout.indexOf(self.openGLWidget)
         self.openGLWidget.deleteLater()
 
-        self.glView = TreeGLWidget(self.centralwidget)
+        self.glView = TreeGLWidget(self.centralwidget, loc_mgr=self.loc_mgr)
         parent_layout.insertWidget(idx, self.glView, stretch=1)
 
         self._restoring_state = True
@@ -129,6 +152,11 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
         self.leaf_dialog = None
         self.settings_win = None
+
+        self.render_timer = QtCore.QTimer(self)
+        self.render_timer.setSingleShot(True)
+        self.render_timer.timeout.connect(self._do_delayed_generation)
+        self._pending_history = True
 
         self._bind_events()
         self._setup_shortcuts()
@@ -210,7 +238,6 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.menu_2.clear()
         self.menu_2.addAction(self.action_open_settings)
 
-
     def set_dirty(self, dirty: bool = True):
         self.is_dirty = dirty
         self.update_window_title()
@@ -220,7 +247,6 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         base_title = t("app_title", "Tree Generator")
         star = "*" if self.is_dirty else ""
         self.setWindowTitle(f"{base_title} - {self.proj_mgr.project_name}{star}")
-
 
     def _get_current_params(self) -> dict:
         return {
@@ -333,7 +359,8 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
     def _on_slider_value_changed(self, value):
         if self._restoring_state:
             return
-        self.update_tree_settings(record_history=not self._slider_dragging)
+        self._pending_history = not self._slider_dragging
+        self.render_timer.start(100)
 
     def _on_slider_released(self):
         if self._slider_dragging:
@@ -343,14 +370,20 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
     def _on_spinbox_changed(self, value):
         if self._restoring_state:
             return
-        self.update_tree_settings(record_history=True)
+        self._pending_history = True
+        self.render_timer.start(450)
+
+    def update_tree_settings(self, record_history: bool = True):
+        self._pending_history = record_history
+        self.render_timer.start(450)
 
     def generate_new_tree(self):
         self.tree_seed = random.randint(1, 999999999)
-        self._rebuild_tree_mesh(reset_camera=False, record_history=True)
+        self._pending_history = True
+        self._do_delayed_generation() 
 
-    def update_tree_settings(self, record_history: bool = True):
-        self._rebuild_tree_mesh(reset_camera=False, record_history=record_history)
+    def _do_delayed_generation(self):
+        self._rebuild_tree_mesh(reset_camera=False, record_history=self._pending_history)
 
     def _rebuild_tree_mesh(self, reset_camera: bool = False, record_history: bool = True):
         h = float(self.horizontalSlider.value())
@@ -534,7 +567,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         msg.setIcon(QtWidgets.QMessageBox.Icon.Warning)
 
         btn_save = msg.addButton(t("btn_save", "Сохранить"), QtWidgets.QMessageBox.ButtonRole.AcceptRole)
-        btn_discard = msg.addButton(t("btn_exit_nosave", "Выйти"), QtWidgets.QMessageBox.ButtonRole.DestructiveRole)
+        btn_discard = msg.addButton(t("btn_exit_nosave", "Выйти без сохранения"), QtWidgets.QMessageBox.ButtonRole.DestructiveRole)
         btn_cancel = msg.addButton(t("btn_cancel", "Отмена"), QtWidgets.QMessageBox.ButtonRole.RejectRole)
         msg.setDefaultButton(btn_save)
 
@@ -644,7 +677,6 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
         self._update_poly_labels()
 
-
     def _update_poly_labels(self):
         t = self.loc_mgr.tr
         trunk_poly = len(self.trunk_v) // 33
@@ -751,8 +783,9 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         QtWidgets.QMessageBox.information(
             self,
             t("success_title", "Успех"),
-            f"{t('export_unity_success', 'Ассет дерева успешно экспортирован для Unity!')}\n{target_dir}"
+            f"{t('export_unity_success', 'Ассет дерева успешно экспортирован для Unity Built-in!')}\n{target_dir}"
         )
+
     def on_export_unity_urp(self):
         t = self.loc_mgr.tr
         if len(self.wood_v) == 0 and len(self.leaf_v) == 0:
@@ -823,6 +856,8 @@ if __name__ == "__main__":
         app.setWindowIcon(QtGui.QIcon(icon_path))
 
     loc_mgr = LocalizationManager()
+    GLOBAL_LOC_MGR = loc_mgr
+    
     settings = load_settings()
 
     if settings.get("first_run", True):

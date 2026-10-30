@@ -11,8 +11,9 @@ from OpenGL.GL import glGetString, GL_VERSION
 
 
 class TreeGLWidget(QOpenGLWidget):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, loc_mgr=None):
         super().__init__(parent)
+        self.loc_mgr = loc_mgr
         self.camera_dist = 22.0
         self.pitch = 18.0
         self.yaw = 45.0
@@ -40,17 +41,20 @@ class TreeGLWidget(QOpenGLWidget):
             version_str = version_str.decode("utf-8", errors="ignore")
         else:
             version_str = "Неизвестно"
+            
         try:
             major, minor = map(int, version_str.split()[:2][0].split(".")[:2])
         except Exception:
             major, minor = 1, 1
 
         if (major, minor) < (3, 3):
-            raise RuntimeError(
-                f"Для работы программы требуется OpenGL 3.3 или выше.\n"
-                f"Текущая версия системы: {version_str}\n\n"
-                f"Обновите видеодрайвер или используйте библиотеку Mesa3D (opengl32.dll)."
-            )
+            if self.loc_mgr:
+                err_tmpl = self.loc_mgr.tr("opengl_version_error", "Для работы программы требуется OpenGL 3.3 или выше.\nТекущая версия системы: {0}")
+                err_msg = err_tmpl.format(version_str)
+            else:
+                err_msg = f"OpenGL 3.3 or higher is required.\nCurrent version: {version_str}"
+            raise RuntimeError(err_msg)
+            
         glEnable(GL_DEPTH_TEST)
         glEnable(GL_CULL_FACE)
         glCullFace(GL_BACK)
