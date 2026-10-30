@@ -7,6 +7,7 @@ from OpenGL.GL import shaders
 from PyQt6.QtOpenGLWidgets import QOpenGLWidget
 from PyQt6.QtCore import Qt, QPoint
 from app_paths import get_path
+from OpenGL.GL import glGetString, GL_VERSION
 
 
 class TreeGLWidget(QOpenGLWidget):
@@ -34,6 +35,22 @@ class TreeGLWidget(QOpenGLWidget):
         self.leaf_textures = {'albedo': 0, 'normal': 0, 'rough': 0, 'transmission': 0, 'ao': 0}
 
     def initializeGL(self):
+        version_str = glGetString(GL_VERSION)
+        if version_str:
+            version_str = version_str.decode("utf-8", errors="ignore")
+        else:
+            version_str = "Неизвестно"
+        try:
+            major, minor = map(int, version_str.split()[:2][0].split(".")[:2])
+        except Exception:
+            major, minor = 1, 1
+
+        if (major, minor) < (3, 3):
+            raise RuntimeError(
+                f"Для работы программы требуется OpenGL 3.3 или выше.\n"
+                f"Текущая версия системы: {version_str}\n\n"
+                f"Обновите видеодрайвер или используйте библиотеку Mesa3D (opengl32.dll)."
+            )
         glEnable(GL_DEPTH_TEST)
         glEnable(GL_CULL_FACE)
         glCullFace(GL_BACK)
